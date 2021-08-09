@@ -5,13 +5,26 @@ from logging import getLogger
 from pathlib import Path
 from typing import Union, cast
 
-from astropy.coordinates import BaseRepresentation, CartesianRepresentation,   \
-                                PhysicsSphericalRepresentation
-import astropy.units as u
 import numpy
+import h5py
 
 from .generic import AntennaModel
 from ... import io
+
+import os
+grand_astropy = True
+try:
+    if os.environ['GRAND_ASTROPY']=="0":
+        grand_astropy=False
+except:
+    pass
+
+
+if grand_astropy:
+    from astropy.coordinates import BaseRepresentation, CartesianRepresentation,   \
+                                PhysicsSphericalRepresentation
+    import astropy.units as u
+
 
 __all__ = ['DataTable', 'TabulatedAntennaModel']
 
@@ -70,6 +83,8 @@ class TabulatedAntennaModel(AntennaModel):
             source = Path(source)
             if source.suffix == '.npy':
                 loader = '_load_from_numpy'
+            elif source.suffix == '.hdf5':
+                loader = '_load_from_hdf5'
             else:
                 loader = '_load_from_datafile'
 
@@ -105,6 +120,61 @@ class TabulatedAntennaModel(AntennaModel):
         shape = (n_f, n_phi, n_theta)
 
         dtype = 'f4'
+        if grand_astropy:
+            f = f[:,0].astype(dtype) * u.MHz
+            theta = theta[0, :n_theta].astype(dtype) * u.deg
+            phi = phi[0, ::n_theta].astype(dtype) * u.deg
+            R = R.reshape(shape).astype(dtype) * u.Ohm
+            X = X.reshape(shape).astype(dtype) * u.Ohm
+            lefft = lefft.reshape(shape).astype(dtype) * u.m
+            leffp = leffp.reshape(shape).astype(dtype) * u.m
+            phaset = numpy.deg2rad(phaset).reshape(shape).astype(dtype) * u.rad
+            phasep = numpy.deg2rad(phasep).reshape(shape).astype(dtype) * u.rad
+        else:
+            # LWP: ToDo: Here we have MHz and somewhere later Hz - CHECK CONSISTENCY!
+            # LWP: In the interpolation below we want Hz
+            f = f[:,0].astype(dtype)*1e6
+            # LWP: Convert those two to radians in the 0,2pi range
+            theta = numpy.mod(numpy.deg2rad(theta[0, :n_theta].astype(dtype)), 2*numpy.pi)
+            phi = numpy.mod(numpy.deg2rad(phi[0, ::n_theta].astype(dtype)), 2*numpy.pi)
+            R = R.reshape(shape).astype(dtype)
+            X = X.reshape(shape).astype(dtype)
+            lefft = lefft.reshape(shape).astype(dtype)
+            leffp = leffp.reshape(shape).astype(dtype)
+            phaset = numpy.deg2rad(phaset).reshape(shape).astype(dtype)
+            phasep = numpy.deg2rad(phasep).reshape(shape).astype(dtype)
+
+
+        t = DataTable(frequency = f, theta = theta, phi = phi, resistance = R,
+                      reactance = X, leff_theta = lefft, phase_theta = phaset,
+                      leff_phi = leffp, phase_phi = phasep)
+                      
+        return cls(table=t)
+
+    @classmethod
+    def _load_from_hdf5(cls, path: Union[Path, str], arm: str = "EW") -> TabulatedAntennaModel:
+        # Open the HDF5 file with antenna info
+        ant_file = h5py.File(path, 'r')
+        # Select the requested arm from the file
+        ant_arm = ant_file[arm]
+        # Load the antenna parameters (to numpy arrays, thus [:])
+        f = ant_arm["frequency"][:]
+        R = ant_arm["resistance"][:]
+        X = ant_arm["reactance"][:]
+        theta = ant_arm["theta"][:]
+        phi = ant_arm["phi"][:]
+        lefft = ant_arm["leff_theta"][:]
+        leffp = ant_arm["leff_phi"][:]
+        phaset = ant_arm["phase_theta"][:]
+        phasep = ant_arm["phase_phi"][:]
+        print("all shape", f.shape, R.shape, X.shape, theta.shape, phi.shape, lefft.shape, leffp.shape, phaset.shape, phasep.shape)
+        
+        n_f = f.shape[0]
+        n_theta = len(numpy.unique(theta[0,:]))
+        n_phi = int(R.shape[1] / n_theta)
+        shape = (n_f, n_phi, n_theta)
+
+        dtype = 'f4'
         f = f[:,0].astype(dtype) * u.MHz
         theta = theta[0, :n_theta].astype(dtype) * u.deg
         phi = phi[0, ::n_theta].astype(dtype) * u.deg
@@ -120,17 +190,28 @@ class TabulatedAntennaModel(AntennaModel):
                       leff_phi = leffp, phase_phi = phasep)
         return cls(table=t)
 
+
     def effective_length(self, direction: BaseRepresentation,
         frequency: u.Quantity) -> CartesianRepresentation:
-
-        direction = direction.represent_as(PhysicsSphericalRepresentation)
-        theta, phi = direction.theta, direction.phi
+        
+        # LWP: Replace with manual conversion to spherical, assuming direction is a numpy array
+        if grand_astropy:
+            direction = direction.represent_as(PhysicsSphericalRepresentation)
+            theta, phi = direction.theta, direction.phi
+        else:
+            theta = numpy.mod(numpy.arctan2(numpy.sqrt(direction[0]**2+direction[1]**2),direction[2]), 2*numpy.pi)
+            phi = numpy.mod(numpy.arctan2(direction[1],direction[0]), 2*numpy.pi)
 
         # Interpolate using a tri-linear interpolation in (f, phi, theta)
         t = self.table
 
         dtheta = t.theta[1] - t.theta[0]
-        rt1 = ((theta - t.theta[0]) / dtheta).to_value(u.one)
+        # LWP: subtracting values from numpy array
+        if grand_astropy:
+            rt1 = ((theta - t.theta[0]) / dtheta).to_value(u.one)
+        else:
+            #rt1 = ((theta - t.theta[0].to_value('rad')) / dtheta.to_value('rad'))
+            rt1 = ((theta - t.theta[0]) / dtheta)            
         it0 = int(numpy.floor(rt1) % t.theta.size)
         it1 = it0 + 1
         if it1 == t.theta.size: # Prevent overflow
@@ -140,7 +221,16 @@ class TabulatedAntennaModel(AntennaModel):
         rt0 = 1 - rt1
 
         dphi = t.phi[1] - t.phi[0]
-        rp1 = ((phi - t.phi[0]) / dphi).to_value(u.one)
+        # LWP: subtracting values from numpy array
+        if grand_astropy:
+            rp1 = ((phi - t.phi[0]) / dphi).to_value(u.one)
+        else:
+            #rp1 = ((phi - t.phi[0].to_value('rad')) / dphi.to_value('rad'))
+            rp1 = ((phi - t.phi[0]) / dphi)
+
+        print("rp1", rp1, phi, t.phi[0], dphi)
+#        exit()
+      
         ip0 = int(numpy.floor(rp1) % t.phi.size)
         ip1 = ip0 + 1
         if ip1 == t.phi.size: # Results are periodic along phi
@@ -148,31 +238,55 @@ class TabulatedAntennaModel(AntennaModel):
         rp1 -= numpy.floor(rp1)
         rp0 = 1 - rp1
 
-        x = frequency.to_value('Hz')
-        xp = t.frequency.to_value('Hz')
+        print("rp1", rp1, phi, t.phi[0], dphi)
+#        exit()
+
+
+        if grand_astropy:
+                x = frequency.to_value('Hz')
+                xp = t.frequency.to_value('Hz')
+        else:
+                x = frequency
+                xp = t.frequency
 
         def interp(v):
             fp = rp0 * rt0 * v[:, ip0, it0] + rp1 * rt0 * v[:, ip1, it0] +     \
                  rp0 * rt1 * v[:, ip0, it1] + rp1 * rt1 * v[:, ip1, it1]
+            print(xp)
+#            exit()
             return numpy.interp(x, xp, fp, left=0, right=0)
 
+#        print(t.leff_theta, interp(t.leff_theta))
+#        exit()
 
-
-        ltr = interp(t.leff_theta.to_value('m'))
-        lta = interp(t.phase_theta.to_value('rad'))
-        lpr = interp(t.leff_phi.to_value('m'))
-        lpa = interp(t.phase_phi.to_value('rad'))
+        if grand_astropy:
+            ltr = interp(t.leff_theta.to_value('m'))
+            lta = interp(t.phase_theta.to_value('rad'))
+            lpr = interp(t.leff_phi.to_value('m'))
+            lpa = interp(t.phase_phi.to_value('rad'))
+        else:
+            ltr = interp(t.leff_theta)
+            lta = interp(t.phase_theta)
+            lpr = interp(t.leff_phi)
+            lpa = interp(t.phase_phi)
 
         # Pack the result as a Cartesian vector with complex values
         lt = ltr * numpy.exp(1j * lta)
         lp = lpr * numpy.exp(1j * lpa)
 
-        t, p = theta.to_value('rad'), phi.to_value('rad')
-
+	    # LWP: to_value not needed anymore
+        if grand_astropy:
+            t, p = theta.to_value('rad'), phi.to_value('rad')
+        else:
+            t, p = theta, phi
+        
         ct, st = numpy.cos(t), numpy.sin(t)
         cp, sp = numpy.cos(p), numpy.sin(p)
         lx = lt * ct * cp - sp * lp
         ly = lt * ct * sp + cp * lp
         lz = -st * lt
 
-        return CartesianRepresentation(lx, ly, lz, unit='m')
+        if grand_astropy:
+            return CartesianRepresentation(lx, ly, lz, unit='m')
+        else:
+            return numpy.stack([lx, ly, lz], axis=1)

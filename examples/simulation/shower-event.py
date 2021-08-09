@@ -8,6 +8,14 @@ import numpy as np
 from matplotlib import pyplot as plt
 from astropy.coordinates import BaseRepresentation, CartesianRepresentation
 
+import os
+grand_astropy = True
+try:
+    if os.environ['GRAND_ASTROPY']=="0":
+        grand_astropy=False
+except:
+    pass
+
 # Load the radio shower simulation data
 showerdir = '../../tests/simulation/data/zhaires'
 shower = ShowerEvent.load(showerdir)
@@ -40,7 +48,16 @@ for antenna_index, field in shower.fields.items():
     antenna_location = shower.frame.realize_frame(field.electric.r)
     print(antenna_index,"Antenna pos=",antenna_location)
 
-    antenna_frame = LTP(location=antenna_location, orientation='NWU',magnetic=True, obstime=shower.frame.obstime)
+    if grand_astropy:
+    	# LWP: antenna_location and antenna_frame are different. I am not sure where it comes from
+        antenna_frame = LTP(location=antenna_location, orientation='NWU',magnetic=True, obstime=shower.frame.obstime)
+    else:
+        # There are things in antenna_location, like separate (x,y,z) (what is it?) and declination, that are lost when creating the frame with astropy, so I guess not needed
+        antenna_frame = np.array(list(antenna_location.location.value))
+        
+        
+#    antenna_frame = LTP(location=antenna_location, orientation='NWU',magnetic=True, obstime=shower.frame.obstime)
+
     antenna = Antenna(model=antenna_model, frame=antenna_frame)
 
 
@@ -53,9 +70,14 @@ for antenna_index, field in shower.fields.items():
     direction = shower.maximum - field.electric.r
     print("Direction to Xmax = ",direction)
     #print(antenna_frame.realize_frame(direction))
-    Exyz = field.electric.E.represent_as(CartesianRepresentation)
+    # LWP: Here field.electric.E seems to be already in the cartesian representation
+    if grand_astropy:
+        Exyz = field.electric.E.represent_as(CartesianRepresentation)
+    else:
+        Exyz = field.electric.E
 
     field.voltage = antenna.compute_voltage(direction, field.electric,frame=shower.frame)
+    print("computed voltage", field.voltage)
 
     plt.figure()
     plt.subplot(211)
