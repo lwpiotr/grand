@@ -27,6 +27,14 @@ if grand_astropy:
     from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation,  \
                                     PhysicsSphericalRepresentation
     import astropy.units as u
+    
+else:
+    # LWP: I wonder if that works..
+    class u():
+        Quantity = Any
+    BaseCoordinateFrame = Any
+    CartesianRepresentation = Any
+    PhysicsSphericalRepresentation = Any
 
 
 __all__ = ['InvalidAntennaName', 'ZhairesShower']
@@ -120,8 +128,6 @@ class ZhairesShower(ShowerEvent):
             inp['core'] = CartesianRepresentation(0, 0, 0, unit='m')
         else:
             inp['core'] = (0,0,0)
-        print("inp", inp)
-#        exit()
         
         try:
             sry_path = path.glob('*.sry').__next__()
@@ -134,20 +140,26 @@ class ZhairesShower(ShowerEvent):
                     'Iron': ParticleCode.IRON
                 }[string.strip()]
 
-            def parse_quantity(string: str) -> u.Quantity:
-                words = string.split()
-                if grand_astropy:
-                    return float(words[0]) * u.Unit(words[1])
-                else:
+            if grand_astropy:
+                def parse_quantity(string: str) -> u.Quantity:
+                    words = string.split()
+                    return float(words[0]) * u.Unit(words[1])                
+    
+                def parse_frame_location(string: str) -> BaseCoordinateFrame:
+                    lat, lon = string.split('Long:')
+                    lat = parse_quantity(lat[:-2])
+                    lon = parse_quantity(lon[:-3])
+                    return ECEF(lat, lon, 0 * u.m, representation_type='geodetic')
+                    
+            else:
+                def parse_quantity(string: str) -> Any:
+                    words = string.split()
                     return float(words[0])                
 
-            def parse_frame_location(string: str) -> BaseCoordinateFrame:
-                lat, lon = string.split('Long:')
-                lat = parse_quantity(lat[:-2])
-                lon = parse_quantity(lon[:-3])
-                if grand_astropy:                    
-                    return ECEF(lat, lon, 0 * u.m, representation_type='geodetic')
-                else:
+                def parse_frame_location(string: str) -> Any:
+                    lat, lon = string.split('Long:')
+                    lat = parse_quantity(lat[:-2])
+                    lon = parse_quantity(lon[:-3])
                     return (float(lat), float(lon), 0)
 
             def parse_date(string: str) -> datetime:
@@ -268,15 +280,27 @@ class ZhairesShower(ShowerEvent):
             for tag, x, y, z, *_ in antennas:
                 tag = tag.decode()
                 antenna = int(pattern.search(tag)[1])
-                r = CartesianRepresentation(
-                    float(x), float(y), float(z), unit=u.m)
-                tmp = traces[f'{tag}/efield'][:]
-                efield = tmp.view('f4').reshape(tmp.shape + (-1,))
-                t = numpy.asarray(efield[:,0], 'f8') << u.ns
-                Ex = numpy.asarray(efield[:,1], 'f8') << u.uV / u.m
-                Ey = numpy.asarray(efield[:,2], 'f8') << u.uV / u.m
-                Ez = numpy.asarray(efield[:,3], 'f8') << u.uV / u.m
-                E = CartesianRepresentation(Ex, Ey, Ez, copy=False),
+                # Not checked in shower-event.py
+                if grand_astropy:
+                    r = CartesianRepresentation(
+                        float(x), float(y), float(z), unit=u.m)
+                    tmp = traces[f'{tag}/efield'][:]
+                    efield = tmp.view('f4').reshape(tmp.shape + (-1,))
+                    t = numpy.asarray(efield[:,0], 'f8') << u.ns
+                    Ex = numpy.asarray(efield[:,1], 'f8') << u.uV / u.m
+                    Ey = numpy.asarray(efield[:,2], 'f8') << u.uV / u.m
+                    Ez = numpy.asarray(efield[:,3], 'f8') << u.uV / u.m
+                    # LWP: Is this coma here at the end a mistake?
+                    E = CartesianRepresentation(Ex, Ey, Ez, copy=False),
+                else:
+                    r = (float(x), float(y), float(z))
+                    tmp = traces[f'{tag}/efield'][:]
+                    efield = tmp.view('f4').reshape(tmp.shape + (-1,))
+                    t = numpy.asarray(efield[:,0], 'f8')
+                    Ex = numpy.asarray(efield[:,1], 'f8')
+                    Ey = numpy.asarray(efield[:,2], 'f8')
+                    Ez = numpy.asarray(efield[:,3], 'f8')
+                    E = (Ex, Ey, Ez)
 
                 fields[antenna] = CollectionEntry(
                     electric=ElectricField(t = t, E = E, r = r))
@@ -287,17 +311,30 @@ class ZhairesShower(ShowerEvent):
                 'Proton' : ParticleCode.PROTON
             }[event[0, 'Primary'].decode()]
 
-            geomagnet = PhysicsSphericalRepresentation(
-                theta = float(90 + event[0, 'BFieldIncl']) << u.deg,
-                phi = 0 << u.deg,
-                r = float(event[0, 'BField']) << u.uT)
+            # LWP: Not checked by shower-event.py
+            if grand_astropy:
+                geomagnet = PhysicsSphericalRepresentation(
+                    theta = float(90 + event[0, 'BFieldIncl']) << u.deg,
+                    phi = 0 << u.deg,
+                    r = float(event[0, 'BField']) << u.uT)
+            else:
+                geomagnet = (float(90 + event[0, 'BFieldIncl']),0,float(event[0, 'BField']))
 
             try:
-                latitude = event[0, 'Latitude'] << u.deg
-                longitude = event[0, 'Longitude'] << u.deg
-                declination = event[0, 'BFieldDecl'] << u.deg
-                obstime = datetime.strptime(event[0, 'Date'].strip(),
-                                            '%d/%b/%Y')
+                # LWP: Not checked by shower-event.py
+                if grand_astropy:
+                    latitude = event[0, 'Latitude'] << u.deg
+                    longitude = event[0, 'Longitude'] << u.deg
+                    declination = event[0, 'BFieldDecl'] << u.deg
+                    obstime = datetime.strptime(event[0, 'Date'].strip(),
+                                                '%d/%b/%Y')
+                else:
+                    latitude = event[0, 'Latitude']
+                    longitude = event[0, 'Longitude']
+                    declination = event[0, 'BFieldDecl']
+                    obstime = datetime.strptime(event[0, 'Date'].strip(),
+                                                '%d/%b/%Y')
+                                                                
             except ValueError:
                 frame = None
             else:
@@ -309,17 +346,34 @@ class ZhairesShower(ShowerEvent):
                     origin = (latitude, longitude, 0)
                     frame = origin
 
-            return cls(
-                energy = float(event[0, 'Energy']) << u.EeV,
-                zenith = (180 - float(event[0, 'Zenith'])) << u.deg,
-                azimuth = -float(event[0, 'Azimuth']) << u.deg,
-                primary = primary,
+            # LWP: Not checked by shower-event.py
+            if grand_astropy:
+                return cls(
+                    energy = float(event[0, 'Energy']) << u.EeV,
+                    zenith = (180 - float(event[0, 'Zenith'])) << u.deg,
+                    azimuth = -float(event[0, 'Azimuth']) << u.deg,
+                    primary = primary,
 
-                frame = frame,
-                core = CartesianRepresentation(0, 0, 0, unit='m'),
-                geomagnet = geomagnet.represent_as(CartesianRepresentation),
-                maximum = CartesianRepresentation(*event[0, 'XmaxPosition'],
-                                                  unit='m'),
+                    frame = frame,
+                    core = CartesianRepresentation(0, 0, 0, unit='m'),
+                    geomagnet = geomagnet.represent_as(CartesianRepresentation),
+                    maximum = CartesianRepresentation(*event[0, 'XmaxPosition'],
+                                                      unit='m'),
 
-                fields = fields
-            )
+                    fields = fields
+                )
+            else:
+                return cls(
+                    energy = float(event[0, 'Energy']),
+                    zenith = (180 - float(event[0, 'Zenith'])),
+                    azimuth = -float(event[0, 'Azimuth']),
+                    primary = primary,
+
+                    frame = frame,
+                    core = (0, 0, 0),
+                    geomagnet = geomagnet,
+                    # LWP: ToDo: unpack somehow, star doesn't work. But no way to test now.
+                    maximum = event[0, 'XmaxPosition'],
+
+                    fields = fields
+                )                            

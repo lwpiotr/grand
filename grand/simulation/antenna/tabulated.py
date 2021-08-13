@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from logging import getLogger
 from pathlib import Path
-from typing import Union, cast
+from typing import Union, cast, Any
 
 import numpy
 import h5py
@@ -34,14 +34,25 @@ _logger = getLogger(__name__)
 
 @dataclass
 class DataTable:
-    frequency: u.Quantity
-    theta: u.Quantity
-    phi: u.Quantity
-    resistance: u.Quantity
-    reactance: u.Quantity
-    leff_theta: u.Quantity
-    phase_theta: numpy.ndarray
-    leff_phi: u.Quantity
+    if grand_astropy:
+        frequency: u.Quantity
+        theta: u.Quantity
+        phi: u.Quantity
+        resistance: u.Quantity
+        reactance: u.Quantity
+        leff_theta: u.Quantity
+        phase_theta: numpy.ndarray
+        leff_phi: u.Quantity
+    else:
+        frequency: Any
+        theta: Any
+        phi: Any
+        resistance: Any
+        reactance: Any
+        leff_theta: Any
+        phase_theta: numpy.ndarray
+        leff_phi: Any
+        
     phase_phi: numpy.ndarray
 
     def dump(self, node: io.DataNode) -> None:
@@ -175,24 +186,44 @@ class TabulatedAntennaModel(AntennaModel):
         shape = (n_f, n_phi, n_theta)
 
         dtype = 'f4'
-        f = f[:,0].astype(dtype) * u.MHz
-        theta = theta[0, :n_theta].astype(dtype) * u.deg
-        phi = phi[0, ::n_theta].astype(dtype) * u.deg
-        R = R.reshape(shape).astype(dtype) * u.Ohm
-        X = X.reshape(shape).astype(dtype) * u.Ohm
-        lefft = lefft.reshape(shape).astype(dtype) * u.m
-        leffp = leffp.reshape(shape).astype(dtype) * u.m
-        phaset = numpy.deg2rad(phaset).reshape(shape).astype(dtype) * u.rad
-        phasep = numpy.deg2rad(phasep).reshape(shape).astype(dtype) * u.rad
+        if grand_astropy:
+            f = f[:,0].astype(dtype) * u.MHz
+            theta = theta[0, :n_theta].astype(dtype) * u.deg
+            phi = phi[0, ::n_theta].astype(dtype) * u.deg
+            R = R.reshape(shape).astype(dtype) * u.Ohm
+            X = X.reshape(shape).astype(dtype) * u.Ohm
+            lefft = lefft.reshape(shape).astype(dtype) * u.m
+            leffp = leffp.reshape(shape).astype(dtype) * u.m
+            phaset = numpy.deg2rad(phaset).reshape(shape).astype(dtype) * u.rad
+            phasep = numpy.deg2rad(phasep).reshape(shape).astype(dtype) * u.rad
+        # LWP: ToDo: The input units from HDF5 should be checked! Now I assume the same as in numpy
+        else:
+            f = f[:,0].astype(dtype)*1e6
+            theta = numpy.mod(numpy.deg2rad(theta[0, :n_theta].astype(dtype)), 2*numpy.pi)
+            phi = numpy.mod(numpy.deg2rad(phi[0, ::n_theta].astype(dtype)), 2*numpy.pi)
+            R = R.reshape(shape).astype(dtype)
+            X = X.reshape(shape).astype(dtype)
+            lefft = lefft.reshape(shape).astype(dtype)
+            leffp = leffp.reshape(shape).astype(dtype)
+            phaset = numpy.deg2rad(phaset).reshape(shape).astype(dtype)
+            phasep = numpy.deg2rad(phasep).reshape(shape).astype(dtype)
 
         t = DataTable(frequency = f, theta = theta, phi = phi, resistance = R,
                       reactance = X, leff_theta = lefft, phase_theta = phaset,
                       leff_phi = leffp, phase_phi = phasep)
         return cls(table=t)
 
+    if grand_astropy:
+        type0 = BaseRepresentation
+        type1 = u.Quantity
+        type2 = CartesianRepresentation
+    else:
+        type0 = Any
+        type1 = Any
+        type2 = Any
 
-    def effective_length(self, direction: BaseRepresentation,
-        frequency: u.Quantity) -> CartesianRepresentation:
+    def effective_length(self, direction: type0,
+        frequency: type1) -> type2:
                 
         # LWP: Replace with manual conversion to spherical, assuming direction is a numpy array
         if grand_astropy:
@@ -221,10 +252,6 @@ class TabulatedAntennaModel(AntennaModel):
             rt1 -= numpy.floor(rt1)
         rt0 = 1 - rt1
 
-        print("rt1", rt1, theta, phi, t.theta[0], dtheta, direction)
-#        exit()
-
-
         dphi = t.phi[1] - t.phi[0]
         # LWP: subtracting values from numpy array
         if grand_astropy:
@@ -232,9 +259,6 @@ class TabulatedAntennaModel(AntennaModel):
         else:
             #rp1 = ((phi - t.phi[0].to_value('rad')) / dphi.to_value('rad'))
             rp1 = ((phi - t.phi[0]) / dphi)
-
-        print("rp1", rp1, phi, t.phi[0], dphi)
-#        exit()
       
         ip0 = int(numpy.floor(rp1) % t.phi.size)
         ip1 = ip0 + 1
@@ -242,10 +266,6 @@ class TabulatedAntennaModel(AntennaModel):
             ip1 = 0
         rp1 -= numpy.floor(rp1)
         rp0 = 1 - rp1
-
-        print("rp1", rp1, phi, t.phi[0], dphi)
-        print("rp0", rp0, rp1, 1-rp1)
-#        exit()
 
         if grand_astropy:
                 x = frequency.to_value('Hz')
@@ -257,15 +277,7 @@ class TabulatedAntennaModel(AntennaModel):
         def interp(v):
             fp = rp0 * rt0 * v[:, ip0, it0] + rp1 * rt0 * v[:, ip1, it0] +     \
                  rp0 * rt1 * v[:, ip0, it1] + rp1 * rt1 * v[:, ip1, it1]
-            print("xp", xp)
-            print("v", v, v.shape)
-            print("rrrs", rp0, rt0, rp1, rt0, ip0, it0, ip1, it1)
-            print("x", x)
-#            exit()
             return numpy.interp(x, xp, fp, left=0, right=0)
-
-        print("leff_theta", t.leff_theta, interp(t.leff_theta))
-#        exit()
 
         if grand_astropy:
             ltr = interp(t.leff_theta.to_value('m'))

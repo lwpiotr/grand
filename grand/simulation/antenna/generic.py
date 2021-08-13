@@ -99,9 +99,14 @@ class Voltage:
 
 
 class AntennaModel:
-    def effective_length(self, direction: BaseRepresentation,
-        frequency: u.Quantity) -> CartesianRepresentation:
-        pass
+    if grand_astropy:
+        def effective_length(self, direction: BaseRepresentation,
+            frequency: u.Quantity) -> CartesianRepresentation:
+            pass
+    else:
+        def effective_length(self, direction: Any,
+            frequency: Any) -> Any:
+            pass
 
 
 class MissingFrameError(ValueError):
@@ -129,9 +134,9 @@ class Antenna:
         # Uniformise the inputs
         if self.frame is None:
             antenna_frame = None
-            if (frame is not None) or                                          \
+            if (frame is not None) or ( grand_astropy and (                                         \
                (not isinstance(field.E, BaseRepresentation)) or                \
-               (not isinstance(direction, BaseRepresentation)):
+               (not isinstance(direction, BaseRepresentation)) ) ):
                 raise MissingFrameError('missing antenna frame')
             else:
                 E_frame, dir_frame = None, None
@@ -193,16 +198,8 @@ class Antenna:
             Ex = rfft(E[:,0])
             Ey = rfft(E[:,1])
             Ez = rfft(E[:,2])            
-            
-#        print("E cart", E)
-#        exit()
-	
 
         f = fftfreq(Ex.size, field.t)
-
-#        print("dir post1", direction)
-#        exit()
-
 
         if dir_frame is not None:
             # Change the direction to the antenna frame
@@ -210,67 +207,34 @@ class Antenna:
             # LWP: this joins direction and dir_frame - not needed if we get rid of astropy
             if grand_astropy:
                 if isinstance(direction, BaseRepresentation):
-                    print("dir pre", direction, dir_frame, antenna_frame)
                     direction = dir_frame.realize_frame(direction)
                 direction = direction.transform_to(antenna_frame) # Now compute direction vector data in antenna frame
-                print("dir1", direction)
                 direction = direction.data
-                print("dir2", direction)                
             else:
                 E = field.E
                 # Bases are in meters
-                #base_diff = numpy.array([dir_frame.location.x.value-antenna_frame.location.x.value, dir_frame.location.y.value-antenna_frame.location.y.value, dir_frame.location.z.value-antenna_frame.location.z.value])/1000
-                # LWP: The frames are NWU and ENU orientation, yet their values are as similar as they had the same orientation...
-                print(antenna_frame, dir_frame)
-                #print(base_diff)
-                # LWP: ToDo: Need to check the orientations of frames and perhaps reposition the x,y,z
-                #direction = numpy.array([direction.x.value,direction.y.value,direction.z.value])+base_diff
-                # LWP: Valentin: The fact that direction gets offset was a bug. The direction should only be rotated actually since it is a vector, not a point.
-                # But both antenna_frame and dir_frame are NWU, so I guess no rotation needed either
-                # direction = numpy.array([direction.x.value,direction.y.value,direction.z.value])
                 direction = numpy.array(direction)
-                print(direction)
-                #exit()
-                
-#            print("dir post1", direction)
-#            exit()
-            
-
 
         Leff:CartesianRepresentation
         Leff = self.model.effective_length(direction, f)
         if antenna_frame is not None:
             if grand_astropy:
                 # Change the effective length to the E-field frame
-                print("Leff first", Leff)
-#                exit()
                 tmp = antenna_frame.realize_frame(Leff)
-                print("tmp1", tmp)
                 tmp = tmp.transform_to(E_frame)
-                print("tmp2", tmp)            
                 # Transorm from antenna_frame to E_frame is a translation.
                 # The Leff vector norm should therefeore not be modified, but it is because it is defined as a point in astropy coordinates
-                #print(Leff,"\n", tmp.cartesian)
-                print("aE", antenna_frame, E_frame)
-                #print(Leff.shape, Leff)
-                
-                #exit()            
                 Leff = tmp.cartesian
             else:
-                print("Leff first", Leff)
-#                exit()
                 # LWP: ToDo: no idea if it is right, since I don't understand the astropy results above
                 print(antenna_frame[0])
                 print(antenna_frame[0], antenna_frame[1], antenna_frame[2])
-#                base_diff = numpy.array([E_frame.location.x.value-antenna_frame[0], E_frame.location.y.value-antenna_frame[1], E_frame.location.z.value-antenna_frame[2]])
                 base_diff = E_frame-antenna_frame
                 print("sh", Leff.shape, Leff)
                 print(base_diff, antenna_frame, E_frame)
                 #exit()
                 Leff+=base_diff
 
-        print("Leff", Leff)
-#        exit()
 
         # Here we have to do an ugly patch for Leff values to be correct
         if grand_astropy:

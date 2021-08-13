@@ -68,18 +68,32 @@ class FieldsCollection(OrderedDict, MutableMapping[int, CollectionEntry]):
 
 @dataclass
 class ShowerEvent:
-    energy: Optional[u.Quantity] = None
-    zenith: Optional[u.Quantity] = None
-    azimuth: Optional[u.Quantity] = None
-    primary: Optional[ParticleCode] = None
+    if grand_astropy:
+        energy: Optional[u.Quantity] = None
+        zenith: Optional[u.Quantity] = None
+        azimuth: Optional[u.Quantity] = None
+        primary: Optional[ParticleCode] = None
 
-    frame: Optional[BaseCoordinateFrame] = None
+        frame: Optional[BaseCoordinateFrame] = None
 
-    core: Optional[CartesianRepresentation] = None
-    geomagnet: Optional[CartesianRepresentation] = None
-    maximum: Optional[CartesianRepresentation] = None
+        core: Optional[CartesianRepresentation] = None
+        geomagnet: Optional[CartesianRepresentation] = None
+        maximum: Optional[CartesianRepresentation] = None
 
-    fields: Optional[FieldsCollection] = None
+        fields: Optional[FieldsCollection] = None
+    else:
+        energy: Optional[Any] = None
+        zenith: Optional[Any] = None
+        azimuth: Optional[Any] = None
+        primary: Optional[ParticleCode] = None
+
+        frame: Optional[Any] = None
+
+        core: Optional[Any] = None
+        geomagnet: Optional[Any] = None
+        maximum: Optional[Any] = None
+
+        fields: Optional[FieldsCollection] = None    
 
     @classmethod
     def load(cls, source: Union[Path, str, io.DataNode]) -> ShowerEvent:
