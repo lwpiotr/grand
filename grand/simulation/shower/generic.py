@@ -6,14 +6,25 @@ from logging import getLogger
 from pathlib import Path
 from typing import cast, MutableMapping, Optional, Union
 
-from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation
-import astropy.units as u
 import numpy
 
 from ..pdg import ParticleCode
 from ..antenna import ElectricField, Voltage
 from ...import io
 from ...tools.coordinates import ECEF, LTP, Rotation
+
+import os
+grand_astropy = True
+try:
+    if os.environ['GRAND_ASTROPY']=="0":
+        grand_astropy=False
+except:
+    pass
+
+if grand_astropy:
+    from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation
+    import astropy.units as u
+
 
 __all__ = ['CollectionEntry', 'FieldsCollection', 'ShowerEvent']
 

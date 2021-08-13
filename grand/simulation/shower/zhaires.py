@@ -6,9 +6,6 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Optional
 
-from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation,  \
-                                PhysicsSphericalRepresentation
-import astropy.units as u
 import h5py
 import numpy
 
@@ -16,6 +13,21 @@ from .generic import CollectionEntry, FieldsCollection, ShowerEvent
 from ..antenna import ElectricField
 from ..pdg import ParticleCode
 from ...tools.coordinates import ECEF, LTP
+
+
+import os
+grand_astropy = True
+try:
+    if os.environ['GRAND_ASTROPY']=="0":
+        grand_astropy=False
+except:
+    pass
+
+if grand_astropy:
+    from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation,  \
+                                    PhysicsSphericalRepresentation
+    import astropy.units as u
+
 
 __all__ = ['InvalidAntennaName', 'ZhairesShower']
 
@@ -37,7 +49,7 @@ class ZhairesShower(ShowerEvent):
         return True
 
     @classmethod
-    def _from_dir(cls, path: Path) -> ZhairesShower:
+    def _from_dir(cls, path: Path) -> ZhairesShower:   
         if not path.exists():
             raise FileNotFoundError(path)
 
@@ -55,12 +67,16 @@ class ZhairesShower(ShowerEvent):
                         raise InvalidAntennaName(words[1])
                     antenna = int(match.group(1))
 
-                    positions[antenna] = CartesianRepresentation(
-                        x = float(words[2]) * u.m,
-                        y = float(words[3]) * u.m,
-                        z = 0 * u.m
-                        #z = float(words[4]) * u.m
-                    )
+                    if grand_astropy:
+                        positions[antenna] = CartesianRepresentation(
+                            x = float(words[2]) * u.m,
+                            y = float(words[3]) * u.m,
+                            z = 0 * u.m
+                            #z = float(words[4]) * u.m
+                        )
+                    else:
+                        positions[antenna] = (float(words[2]), float(words[3]),0)
+                    
                     #print("### Warning: Forcing antenna height = 0m")
 
         fields: Optional[FieldsCollection] = None
@@ -69,16 +85,29 @@ class ZhairesShower(ShowerEvent):
             antenna = int(field_path.name[1:].split('.', 1)[0])
             logger.debug(f'Loading trace for antenna {antenna}')
             data = numpy.loadtxt(field_path)
-            uVm = u.uV / u.m
-            t  = data[:,0] * u.ns
-            Ex = data[:,1] * uVm
-            Ey = data[:,2] * uVm
-            Ez = data[:,3] * uVm
-            electric = ElectricField(
-                t,
-                CartesianRepresentation(Ex, Ey, Ez),
-                positions[antenna]
-            )
+            if grand_astropy:
+                uVm = u.uV / u.m
+                t  = data[:,0] * u.ns
+                Ex = data[:,1] * uVm
+                Ey = data[:,2] * uVm
+                Ez = data[:,3] * uVm
+                electric = ElectricField(
+                    t,
+                    CartesianRepresentation(Ex, Ey, Ez),
+                    positions[antenna]
+                )
+#                print(electric)
+                
+            else:
+                #LWP: ToDo: change to seconds? They are ns now
+                t  = data[:,0]
+                Ex = data[:,1]
+                Ey = data[:,2]
+                Ez = data[:,3]
+                electric = ElectricField(t, numpy.stack([Ex, Ey, Ez], axis=1), positions[antenna])
+#                print(electric)
+#            exit()                
+                            
             raw_fields[antenna] = CollectionEntry(electric)
 
         if raw_fields:
@@ -87,7 +116,13 @@ class ZhairesShower(ShowerEvent):
                 fields[key] = raw_fields[key]
 
         inp: Dict[str, Any] = {}
-        inp['core'] = CartesianRepresentation(0, 0, 0, unit='m')
+        if grand_astropy:
+            inp['core'] = CartesianRepresentation(0, 0, 0, unit='m')
+        else:
+            inp['core'] = (0,0,0)
+        print("inp", inp)
+#        exit()
+        
         try:
             sry_path = path.glob('*.sry').__next__()
         except StopIteration:
@@ -101,13 +136,19 @@ class ZhairesShower(ShowerEvent):
 
             def parse_quantity(string: str) -> u.Quantity:
                 words = string.split()
-                return float(words[0]) * u.Unit(words[1])
+                if grand_astropy:
+                    return float(words[0]) * u.Unit(words[1])
+                else:
+                    return float(words[0])                
 
             def parse_frame_location(string: str) -> BaseCoordinateFrame:
                 lat, lon = string.split('Long:')
                 lat = parse_quantity(lat[:-2])
                 lon = parse_quantity(lon[:-3])
-                return ECEF(lat, lon, 0 * u.m, representation_type='geodetic')
+                if grand_astropy:                    
+                    return ECEF(lat, lon, 0 * u.m, representation_type='geodetic')
+                else:
+                    return (float(lat), float(lon), 0)
 
             def parse_date(string: str) -> datetime:
                 return datetime.strptime(string.strip(), '%d/%b/%Y')
@@ -122,16 +163,26 @@ class ZhairesShower(ShowerEvent):
                     raise NotImplementedError(string)
 
             def parse_geomagnet_intensity(string: str) -> u.Quantity:
-                return float(string.split()[0]) << u.uT
+                if grand_astropy:
+                    return float(string.split()[0]) << u.uT
+                else:
+                    return float(string.split()[0])                
 
             def parse_geomagnet_angles(string: str) -> CartesianRepresentation:
                 intensity = inp['geomagnet']
                 inclination, _, _, declination, _ = string.split()
-                theta = (90 + float(inclination)) << u.deg
-                inp['_declination'] = float(declination) << u.deg
-                spherical = PhysicsSphericalRepresentation(theta=theta,
-                    phi=0 << u.deg, r=intensity)
-                return spherical.represent_as(CartesianRepresentation)
+                if grand_astropy:
+                    theta = (90 + float(inclination)) << u.deg
+                    inp['_declination'] = float(declination) << u.deg
+                    spherical = PhysicsSphericalRepresentation(theta=theta,
+                        phi=0 << u.deg, r=intensity)
+                    return spherical.represent_as(CartesianRepresentation)
+                else:
+                    # LWP: ToDo: Should be changed to radians! But that requires checking the code that uses it later, if it accepts radians
+                    theta = (90 + float(inclination))
+                    inp['_declination'] = float(declination)
+                    return (intensity*numpy.cos(0)*numpy.sin(numpy.deg2rad(theta)),intensity*numpy.sin(0)*numpy.sin(numpy.deg2rad(theta)),intensity*numpy.cos(numpy.deg2rad(theta)))
+                
 
             def parse_maximum(string: str) -> CartesianRepresentation:
                 _, _, *xyz = string.split()
@@ -148,7 +199,12 @@ class ZhairesShower(ShowerEvent):
                             ground_alt = float(line.split()[1])
                 except StopIteration:
                     raise FileNotFoundError(path / '*.inp')
-                return CartesianRepresentation(x * u.km, y * u.km, (z-ground_alt/1000) * u.km)
+                    
+                if grand_astropy:
+                    return CartesianRepresentation(x * u.km, y * u.km, (z-ground_alt/1000) * u.km)
+                else:
+                    # LWP: Change to meters, for compatibility with field.electric.r in shower-event.py
+                    return (x*1000, y*1000, (z-ground_alt/1000)*1000)
 
             converters = (
                 ('(Lat', 'frame', parse_frame_location),
@@ -172,6 +228,7 @@ class ZhairesShower(ShowerEvent):
                     if start < 0: continue
 
                     inp[k] = convert(line[start+len(tag)+1:])
+                    print("inp", k, inp[k], type(inp[k]))
                     i = i + 1
                     try:
                         tag, k, convert = converters[i]
@@ -182,14 +239,17 @@ class ZhairesShower(ShowerEvent):
         declination = inp.pop('_declination')
         obstime = inp.pop('_obstime')
         orientation = inp['frame']
-        inp['frame'] = LTP(location=origin, orientation=orientation,
+        if grand_astropy:
+        	inp['frame'] = LTP(location=origin, orientation=orientation,
                            declination=declination, obstime=obstime)
+        else:
+            inp['frame'] = origin
 
         return cls(fields=fields, **inp)
 
 
     @classmethod
-    def _from_datafile(cls, path: Path) -> ZhairesShower:
+    def _from_datafile(cls, path: Path) -> ZhairesShower:  
         with h5py.File(path, 'r') as fd:
             if not 'RunInfo.__table_column_meta__' in fd['/']:
                 return super()._from_datafile(path)
@@ -243,8 +303,13 @@ class ZhairesShower(ShowerEvent):
             else:
                 origin = ECEF(latitude, longitude, 0 * u.m,
                               representation_type='geodetic')
-                frame = LTP(location=origin, orientation='NWU',
+                if grand_astropy:
+                	frame = LTP(location=origin, orientation='NWU',
                             declination=declination, obstime=obstime)
+                else:
+                	frame = origin
+                	print("tutu")
+                	exit()
 
             return cls(
                 energy = float(event[0, 'Energy']) << u.EeV,

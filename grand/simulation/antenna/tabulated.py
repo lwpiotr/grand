@@ -193,7 +193,7 @@ class TabulatedAntennaModel(AntennaModel):
 
     def effective_length(self, direction: BaseRepresentation,
         frequency: u.Quantity) -> CartesianRepresentation:
-        
+                
         # LWP: Replace with manual conversion to spherical, assuming direction is a numpy array
         if grand_astropy:
             direction = direction.represent_as(PhysicsSphericalRepresentation)
@@ -211,7 +211,8 @@ class TabulatedAntennaModel(AntennaModel):
             rt1 = ((theta - t.theta[0]) / dtheta).to_value(u.one)
         else:
             #rt1 = ((theta - t.theta[0].to_value('rad')) / dtheta.to_value('rad'))
-            rt1 = ((theta - t.theta[0]) / dtheta)            
+            rt1 = ((theta - t.theta[0]) / dtheta)   
+                            
         it0 = int(numpy.floor(rt1) % t.theta.size)
         it1 = it0 + 1
         if it1 == t.theta.size: # Prevent overflow
@@ -219,6 +220,10 @@ class TabulatedAntennaModel(AntennaModel):
         else:
             rt1 -= numpy.floor(rt1)
         rt0 = 1 - rt1
+
+        print("rt1", rt1, theta, phi, t.theta[0], dtheta, direction)
+#        exit()
+
 
         dphi = t.phi[1] - t.phi[0]
         # LWP: subtracting values from numpy array
@@ -239,8 +244,8 @@ class TabulatedAntennaModel(AntennaModel):
         rp0 = 1 - rp1
 
         print("rp1", rp1, phi, t.phi[0], dphi)
+        print("rp0", rp0, rp1, 1-rp1)
 #        exit()
-
 
         if grand_astropy:
                 x = frequency.to_value('Hz')
@@ -248,15 +253,18 @@ class TabulatedAntennaModel(AntennaModel):
         else:
                 x = frequency
                 xp = t.frequency
-
+        	
         def interp(v):
             fp = rp0 * rt0 * v[:, ip0, it0] + rp1 * rt0 * v[:, ip1, it0] +     \
                  rp0 * rt1 * v[:, ip0, it1] + rp1 * rt1 * v[:, ip1, it1]
-            print(xp)
+            print("xp", xp)
+            print("v", v, v.shape)
+            print("rrrs", rp0, rt0, rp1, rt0, ip0, it0, ip1, it1)
+            print("x", x)
 #            exit()
             return numpy.interp(x, xp, fp, left=0, right=0)
 
-#        print(t.leff_theta, interp(t.leff_theta))
+        print("leff_theta", t.leff_theta, interp(t.leff_theta))
 #        exit()
 
         if grand_astropy:
