@@ -11,7 +11,6 @@ import numpy
 from ..pdg import ParticleCode
 from ..antenna import ElectricField, Voltage
 from ...import io
-from ...tools.coordinates import ECEF, LTP, Rotation
 
 import os
 grand_astropy = True
@@ -22,6 +21,7 @@ except:
     pass
 
 if grand_astropy:
+    from ...tools.coordinates import ECEF, LTP, Rotation
     from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation
     import astropy.units as u
 
@@ -175,18 +175,31 @@ class ShowerEvent:
             m = len(self.fields)
             _logger.info(f'Dumped {m} field(s) to {node.filename}:{node.path}')
 
-    def localize(self, latitude: u.Quantity, longitude: u.Quantity,
-            height: Optional[u.Quantity]=None,
-            declination: Optional[u.Quantity]=None,
-            obstime: Union[datetime, Time, str, None]=None) -> None:
+    # LWP: Not checked in shower-event.py, so not sure if correct astropy removal
+    if grand_astropy:
+        def localize(self, latitude: u.Quantity, longitude: u.Quantity,
+                height: Optional[u.Quantity]=None,
+                declination: Optional[u.Quantity]=None,
+                obstime: Union[datetime, Time, str, None]=None) -> None:
 
-        if height is None:
-            height = 0 * u.m
+            if height is None:
+                height = 0 * u.m
 
-        location = ECEF(latitude, longitude, height,
-                        representation_type='geodetic')
-        self.frame = LTP(location=location, orientation='NWU', magnetic=True,
-                         declination=declination, obstime=obstime)
+            location = ECEF(latitude, longitude, height,
+                            representation_type='geodetic')
+            self.frame = LTP(location=location, orientation='NWU', magnetic=True,
+                             declination=declination, obstime=obstime)
+    else:
+        def localize(self, latitude, longitude,
+                height=None,
+                declination=None,
+                obstime=None) -> None:
+
+            if height is None:
+                height = 0
+
+            location = (latitude, longitude, height)
+            self.frame = location
 
     def shower_frame(self) -> BaseCoordinateFrame:
         ev = self.core - self.maximum
@@ -195,7 +208,13 @@ class ShowerEvent:
         evB /= evB.norm()
         evvB = ev.cross(evB)
 
-        r = Rotation.from_matrix(numpy.array((evB.xyz, evvB.xyz, ev.xyz)).T)
+        if grand_astropy:
+            r = Rotation.from_matrix(numpy.array((evB.xyz, evvB.xyz, ev.xyz)).T)
+        else:
+            # LWP: ToDo: The above also calls the same scipy method, so probably should be reimplemented in the new class, or the import below should go to the top of the file
+            from scipy.spatial.transform import Rotation
+            r = Rotation.from_matrix(numpy.array((evB.xyz, evvB.xyz, ev.xyz)).T)
+            
         return self.frame.rotated(r)
 
     def transform(self, representation: BaseRepresentation,

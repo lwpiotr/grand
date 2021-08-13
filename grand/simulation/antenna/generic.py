@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from logging import getLogger
-from typing import cast, Optional, Union
+# LWP: added Any for later use
+from typing import cast, Optional, Union, Any
 import numpy
-from ... import io, ECEF, LTP
+# LWP moved the frames to the astropy only case
+from ... import io#, ECEF, LTP
 
 import os
 grand_astropy = True
@@ -16,6 +18,7 @@ except:
 
 
 if grand_astropy:
+    from ... import ECEF, LTP
     from astropy.coordinates import BaseRepresentation, CartesianRepresentation
     import astropy.units as u
 
@@ -31,8 +34,13 @@ class ElectricField:
     t: u.Quantity
     E: BaseRepresentation
     r: Union[BaseRepresentation, None] = None
-    frame: Union[ECEF, LTP, None] = None
+    if grand_astropy:
+        type0 = Union[ECEF, LTP, None]
+    else:
+        type0 = Any
 
+    frame: type0 = None
+        
     @classmethod
     def load(cls, node: io.DataNode):
         _logger.debug(f'Loading E-field from {node.filename}:{node.path}')
@@ -96,10 +104,20 @@ class MissingFrameError(ValueError):
 @dataclass
 class Antenna:
     model: AntennaModel
-    frame: Union[ECEF, LTP, None] = None
+    # LWP: shower-event.py does not test the Antenna now, so not sure if these astropy removals would work
+    if grand_astropy:
+        type0 = Union[ECEF, LTP, None]
+        type1 = Union[ECEF, LTP, BaseRepresentation]
+        type2 = Union[ECEF, LTP, None]
+    else:
+        type0 = Any
+        type1 = Any
+        type2 = Any
 
-    def compute_voltage(self, direction: Union[ECEF, LTP, BaseRepresentation],
-            field: ElectricField, frame: Union[ECEF, LTP, None]=None)          \
+    frame: type0 = None        
+
+    def compute_voltage(self, direction: type1,
+            field: ElectricField, frame: type2=None)          \
             -> Voltage:
         # Uniformise the inputs
         if self.frame is None:
@@ -112,7 +130,10 @@ class Antenna:
                 E_frame, dir_frame = None, None
                 E = field.E
         else:
-            antenna_frame = cast(Union[ECEF, LTP], self.frame)
+            if grand_astropy:
+                antenna_frame = cast(Union[ECEF, LTP], self.frame)
+            else:
+                antenna_frame = self.frame
             frame_required = False
 
             if field.frame is None:

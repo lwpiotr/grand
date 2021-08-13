@@ -1,5 +1,4 @@
 #! /usr/bin/env python
-from grand import ECEF, LTP
 from grand.simulation import Antenna, ShowerEvent, TabulatedAntennaModel
 #from grand.simulation import ShowerEvent, TabulatedAntennaModel
 #from grand.simulation.antenna .generic import compute_voltage
@@ -16,6 +15,7 @@ except:
     pass
 
 if grand_astropy:
+    from grand import ECEF, LTP
     import astropy.units as u
     from astropy.coordinates import BaseRepresentation, CartesianRepresentation
     

@@ -12,7 +12,6 @@ import numpy
 from .generic import CollectionEntry, FieldsCollection, ShowerEvent
 from ..antenna import ElectricField
 from ..pdg import ParticleCode
-from ...tools.coordinates import ECEF, LTP
 
 
 import os
@@ -24,6 +23,7 @@ except:
     pass
 
 if grand_astropy:
+    from ...tools.coordinates import ECEF, LTP
     from astropy.coordinates import BaseCoordinateFrame, CartesianRepresentation,  \
                                     PhysicsSphericalRepresentation
     import astropy.units as u
@@ -301,15 +301,13 @@ class ZhairesShower(ShowerEvent):
             except ValueError:
                 frame = None
             else:
-                origin = ECEF(latitude, longitude, 0 * u.m,
-                              representation_type='geodetic')
                 if grand_astropy:
-                	frame = LTP(location=origin, orientation='NWU',
+                    origin = ECEF(latitude, longitude, 0 * u.m, representation_type='geodetic')                
+                    frame = LTP(location=origin, orientation='NWU',
                             declination=declination, obstime=obstime)
                 else:
-                	frame = origin
-                	print("tutu")
-                	exit()
+                    origin = (latitude, longitude, 0)
+                    frame = origin
 
             return cls(
                 energy = float(event[0, 'Energy']) << u.EeV,
