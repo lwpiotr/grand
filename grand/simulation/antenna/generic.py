@@ -31,14 +31,17 @@ _logger = getLogger(__name__)
 
 @dataclass
 class ElectricField:
-    t: u.Quantity
-    E: BaseRepresentation
-    r: Union[BaseRepresentation, None] = None
     if grand_astropy:
+        t: u.Quantity
+        E: BaseRepresentation
+        r: Union[BaseRepresentation, None] = None    
         type0 = Union[ECEF, LTP, None]
     else:
+        t: Any
+        E: Any
+        r: Any
         type0 = Any
-
+    
     frame: type0 = None
         
     @classmethod
@@ -75,9 +78,13 @@ class ElectricField:
 
 @dataclass
 class Voltage:
-    t: u.Quantity
-    V: u.Quantity
-
+    if grand_astropy:
+        t: u.Quantity
+        V: u.Quantity
+    else:
+        t: Any
+        V: Any
+    
     @classmethod
     def load(cls, node: io.DataNode):
         _logger.debug(f'Loading voltage from {node.filename}:{node.path}')
